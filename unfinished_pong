@@ -23,7 +23,29 @@ __asm__ volatile(".L1: B .L1\n");				/* never return */
 #define GPIO_IDR_HIGH ((volatile unsigned char *) (0x40020C11))
 #define GPIO_ODR_LOW ((volatile unsigned char *) (0x40020C14))
 #define GPIO_ODR_HIGH ((volatile unsigned char *) (0x40020C15))
+
+
+/* Display defines */
+#define PORT_BASE 0x40021000
+#define portModer ((volatile unsigned int *) (PORT_BASE))
+#define portOtyper ((volatile unsigned short *) (PORT_BASE+0x4))
+#define portOspeedr ((volatile unsigned int *) (PORT_BASE+0x8))  
+#define portPupdr ((volatile unsigned int *) (PORT_BASE+0xC))
+
+#define portIDRLow ((volatile unsigned char *) (PORT_BASE+0x10))
+#define portIDRHigh ((volatile unsigned char *) (PORT_BASE+0x10+1))
+#define portODRLow ((volatile unsigned char *) (PORT_BASE+0x14))
+#define portODRHigh ((volatile unsigned char *) (PORT_BASE+0x14+1))
+
+#define B_E 0x40
+#define B_SELECT 4
+#define B_RW 2
+#define B_RS 1
+
 }
+
+int g_score_left = 48;
+int g_score_right = 48;
 
 __attribute__((naked))
 void graphic_initialize(void) {
@@ -61,7 +83,12 @@ void app_init( void ) {
 	/* PUPDR: */
 	*(GPIO_PUPDR) &= 0xFF00FFFF;
 	*(GPIO_PUPDR) |= 0x00AA0000;
+	
+	/*port E */
+	*portModer = 0x55555555;
 }
+
+
 void kbd_1_Activate( unsigned int row) {
 	
 	if(row == 0) {
@@ -230,7 +257,7 @@ void clear_ballobject(POBJECT o) {
 		graphic_pixel_clear(org_x+px.x, org_y+px.y);
 	}
 }
-void move_ballobject(POBJECT o) {
+void move_ballobject(POBJECT o, int startpos_x_ball, int startpos_y_ball) {
 	clear_ballobject(o);
 	
 	PGEOMETRY geo_pointer = o -> geo;
@@ -247,11 +274,13 @@ void move_ballobject(POBJECT o) {
 	next_y +=dir_y;
 	/* Ny positon */
 	if(next_x < 1) {
-		o -> dirx *= (-1);
+		g_score_right++;
+		reset_object(o, startpos_x_ball, startpos_y_ball);
 		//o -> dirx = -(o -> dirx);
 	}
 	if(next_x > 128) {
-		o -> dirx *= (-1);
+		g_score_left++;
+		reset_object(o, startpos_x_ball, startpos_y_ball);
 		//o -> dirx = -(o -> dirx);
 	}
 	if(next_y < 1) {
@@ -344,7 +373,16 @@ void reset_object(POBJECT obj, int startpos_x, int startpos_y) {
 	obj -> posy = startpos_y;
 }
 
-void collision(POBJECT ball, POBJECT paddle) {
+void collision_left(POBJECT ball, POBJECT paddle) {
+	
+	if((ball -> posx) >= paddle -> posx && (ball -> posx) <= paddle -> posx + 5 ) {
+		if((ball -> posy + 4) >= paddle -> posy && (ball -> posy) <= paddle -> posy + 8 ) {
+			set_ballobject_speed(ball, -4, 1);
+			
+		}
+	}
+}
+void collision_right(POBJECT ball, POBJECT paddle) {
 	
 	if((ball -> posx + 4) >= paddle -> posx && (ball -> posx) <= paddle -> posx + 5 ) {
 		if((ball -> posy + 4) >= paddle -> posy && (ball -> posy) <= paddle -> posy + 8 ) {
@@ -354,10 +392,144 @@ void collision(POBJECT ball, POBJECT paddle) {
 	}
 }
 
+/* ----- Asciicode----- */
+
+char ascii_read_controller( void ) {
+	*portModer = 0x00005555;
+	char rv;
+	
+	ascii_ctrl_bit_set( B_E );
+	delay_mikro(2);
+	
+	rv = *portIDRHigh;  
+	ascii_ctrl_bit_clear( B_E );
+	*portModer = 0x55555555;
+	return rv;
+}
+
+char ascii_read_status( void ) {
+	
+	*portModer = 0x00005555;
+	ascii_ctrl_bit_clear( B_RS );
+	ascii_ctrl_bit_set( B_RW );
+	char rv = ascii_read_controller(); 
+	
+	*portModer = 0x55555555;
+	return rv;
+} 
+
+void ascii_gotoxy(int x, int y) {
+	unsigned char address;
+	
+	if(y != 1) {
+		address = 0x40 | x -1;;
+		
+	} else {
+		address = x -1;
+	}
+	ascii_write_cmd(0x80 | address);
+	
+}
+
+void ascii_write_char( unsigned char c ) {
+	while( (ascii_read_status() & 0x80) == 0x80 ) {}
+	delay_mikro(1);
+	ascii_write_data( c );
+	delay_mikro(1);
+}
+
+void ascii_ctrl_bit_clear( char x ) {
+	char c = *portODRLow;
+	c = c & ~x;
+	*portODRLow = B_SELECT | c;
+}
+
+void ascii_ctrl_bit_set( unsigned char x ) {
+	char c = *portODRLow;
+	*portODRLow = B_SELECT | x | c;
+}
+
+void ascii_write_controller( unsigned char command) {
+	ascii_ctrl_bit_set( B_E );
+	*portODRHigh = command;
+	ascii_ctrl_bit_clear( B_E );
+	delay_250ns();
+}
+
+void ascii_write_cmd( unsigned char command ) {
+	ascii_ctrl_bit_clear( B_RS );
+	ascii_ctrl_bit_clear( B_RW );
+	
+	ascii_write_controller(command);
+}
+
+void ascii_write_data( unsigned char data ) {
+	ascii_ctrl_bit_clear( B_RW );
+	ascii_ctrl_bit_set( B_RS );
+	
+	
+	ascii_write_controller(data);
+}
+
+char ascii_read_data( void ) {
+	char rv;
+	
+	*portModer = 0x00005555;
+	ascii_ctrl_bit_set( B_RS );
+	ascii_ctrl_bit_set( B_RW );
+	rv = ascii_read_controller();
+	
+	*portModer = 0x55555555;
+	return rv;
+	
+}
+
+
+
+void ascii_init( void ) {
+	// -- Struktur --
+	// Vänta tills statusflaggan är 0
+	// Fördröj 8 us
+	// write_cmd
+	// Fördröj med specifik fördröjning
+	
+	// Function Set:
+	while( (ascii_read_status() & 0x80) == 0x80 ) {}
+	delay_mikro(8);
+	ascii_write_cmd(0x38); 
+	delay_mikro(50);
+	
+	// Display Control:
+	while( (ascii_read_status() & 0x80) == 0x80 ) {}
+	delay_mikro(8);
+	ascii_write_cmd(0x0C);
+	delay_milli(2);
+	
+	// Clear Display:
+	while( (ascii_read_status() & 0x80) == 0x80 ) {}
+	delay_mikro(8);
+	ascii_write_cmd(1);
+	delay_milli(2); 
+	
+	// Entry Mode Set:
+	while( (ascii_read_status() & 0x80) == 0x80 ) {}
+	delay_mikro(8);
+	ascii_write_cmd(6);
+	delay_mikro(50);
+}
+
+
+
 void main(void) {
 	app_init();
 	char c;
 	char d;
+	char *s;
+	char score_left[] = "Player 1 score: ";
+	char score_right[] = "Player 2 score: ";
+	score_left[15] = g_score_left;
+	score_right[15] = 48;
+	ascii_init();
 	graphic_initialize();
 	graphic_clear_screen();
 	POBJECT ball = &ballobject;
@@ -365,6 +537,17 @@ void main(void) {
 	POBJECT paddle_2 = &paddleobject_2;
 	draw_ballobject(paddle_1);
 	draw_ballobject(paddle_2);
+	
+	s = score_left;
+	while( *s  ) {
+		ascii_write_char( *s++ );
+	}
+	
+	ascii_gotoxy(1, 2);
+	s = score_right;
+	while( *s ) {
+		ascii_write_char( *s++ );
+	}
 	
 	int startpos_x_ball = ball -> posx;
 	int startpos_y_ball = ball -> posy;
@@ -375,9 +558,9 @@ void main(void) {
 	
 	
 	while(1) {
-		collision(ball, paddle_1);
-		collision(ball, paddle_2);
-		move_ballobject(ball);
+		collision_left(ball, paddle_1);
+		collision_right(ball, paddle_2);
+		move_ballobject(ball, startpos_x_ball, startpos_y_ball);
 		paddle_1 -> move(paddle_1);
 		paddle_2 -> move(paddle_2);
 		delay_milli(20);
@@ -399,6 +582,13 @@ void main(void) {
 			case 9:   paddle_2->set_speed(paddle_2, 0, 3); break;
 			case 255: paddle_2->set_speed(paddle_2, 0, 0); break;
 			case 6:   reset_object(ball, startpos_x_ball, startpos_y_ball); reset_object(paddle_2, startpos_x_paddle_2, startpos_y_paddle_2); break;
+			
+			
 		}
+		ascii_gotoxy(16, 1);
+		ascii_write_char( g_score_left );
+		
+		ascii_gotoxy(16, 2);
+		ascii_write_char( g_score_right );
 	}
 }
