@@ -204,7 +204,24 @@ GEOMETRY ball_geometry = {
 	}
 };
 
-GEOMETRY paddle_geometry = {
+GEOMETRY paddle_geometry_right = {
+	30,
+	5,9,
+	{
+		// Vertikal Linje Start
+		{0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8},
+		// Horisontell Linje  Top
+		{1,0}, {2,0}, {3,0}, {4,0},
+		// Vertikal Linje End
+		{4,0}, {4,1}, {4,2}, {4,3}, {4,4}, {4,5}, {4,6}, {4,7}, {4,8},
+		// Horisontell Linje Bottom
+		{1,8}, {2,8}, {3,8}, {4,8},
+		// Punkterna i mitten
+		{2,3}, {2,4}, {2,5}
+	}
+};
+
+GEOMETRY paddle_geometry_left = {
 	30,
 	5,9,
 	{
@@ -306,7 +323,7 @@ void set_ballobject_speed(POBJECT o, int speed_x, int speed_y) {
 }
 
 static OBJECT paddleobject_2 = {
-	&paddle_geometry,
+	&paddle_geometry_right,
 	0,0,
 	100,32,
 	draw_ballobject,
@@ -316,7 +333,7 @@ static OBJECT paddleobject_2 = {
 };
 
 static OBJECT paddleobject_1 = {
-	&paddle_geometry,
+	&paddle_geometry_left,
 	0,0,
 	20,32,
 	draw_ballobject,
@@ -375,9 +392,13 @@ void reset_object(POBJECT obj, int startpos_x, int startpos_y) {
 
 void collision_left(POBJECT ball, POBJECT paddle) {
 	
+	PGEOMETRY geo_pointer = ball -> geo;
+	int dir_x = ball -> dirx;
+	
+	
 	if((ball -> posx) >= paddle -> posx && (ball -> posx) <= paddle -> posx + 5 ) {
 		if((ball -> posy + 4) >= paddle -> posy && (ball -> posy) <= paddle -> posy + 8 ) {
-			set_ballobject_speed(ball, -4, 1);
+			ball -> dirx *= (-1);
 			
 		}
 	}
